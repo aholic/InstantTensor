@@ -163,7 +163,35 @@ void test_random_layouts() {
             fprintf(stderr, "layout trial %d failed, ranks=%zu chunk=%zu\n", trial, ranks, chunk);
             throw;
         }
+        vector<bool> keep(offsets.size() - files);
+        for (size_t i = 0; i < keep.size(); ++i) keep[i] = random() % 2;
+        Loader filtered(nullptr, nullptr);
+        configure(filtered, chunk, ranks, 10 * world_chunk + 64);
+        filtered.compute_layout(offsets, keep);
+        verify(filtered);
     }
+}
+
+void test_filtered_layout() {
+    vector<pair<size_t, size_t>> offsets = {
+        {0,4096}, {0,8192}, {0,12288}, {0,65536}, {0,69632},
+        {1,4096}, {1,8192}, {1,12288},
+    };
+    Loader loader(nullptr, nullptr);
+    configure(loader, 4096, 1, 65536);
+    loader.compute_layout(offsets, {true, false, false, true, false, true});
+    require(loader.tensors.size() == 3 && loader.chunks.size() == 3,
+            "only selected tensors should have chunks");
+    require(loader.chunks[0].file_offset == 4096 &&
+            loader.chunks[1].file_offset == 65536 &&
+            loader.chunks[2].file_offset == 8192,
+            "skipped tensor payloads must not be read");
+    verify(loader);
+
+    Loader empty(nullptr, nullptr);
+    configure(empty, 4096, 1, 65536);
+    empty.compute_layout(offsets, vector<bool>(6, false));
+    require(empty.chunks.empty() && empty.tensors.empty(), "empty selection performs IO");
 }
 }
 
@@ -172,5 +200,6 @@ int main() {
     test_first_chunk_prefix();
     test_boundaries_and_empty_tensors();
     test_random_layouts();
+    test_filtered_layout();
     puts("layout regressions and 1000 randomized layouts passed");
 }

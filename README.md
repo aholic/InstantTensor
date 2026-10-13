@@ -121,6 +121,36 @@ with safe_open(files, framework="pt", device=torch.cuda.current_device(), proces
 
 > **NOTE:** You can also load weights using a subgroup created via `dist.new_group`, which allows multiple subgroups to load weights independently. For example, if you have TP=8 and PP=2 (i.e., two TP groups), you can create two subgroups and load weights independently on each TP group. In cross-node (multi-machine) scenarios, loading using per-node subgroups can sometimes be faster than loading on the world group. However, for most cases, the world group is a good default choice.
 
+### Selective loading
+
+Use `tensor_filter` to skip tensor payloads before I/O. Buffer sizing,
+`keys()`, and `total_tensor_size` include only selected tensors. Reads may
+include neighboring bytes required for page alignment.
+
+```python
+with safe_open(files, framework="pt", device=0,
+               tensor_filter=["model.embed_tokens.weight", "model.layers.0.*"]) as f:
+    for name, tensor in f.tensors():
+        tensors[name] = tensor
+```
+
+Filtering requires `process_group=None`: each GPU loads its own selection
+independently. Unfiltered distributed loading is unchanged.
+Use `tensor_name_match_mode` to choose how all entries in the list are interpreted:
+
+| Mode | Example | Matching |
+|---|---|---|
+| `"glob"` (default) | `"model.layers.*.weight"` | Shell-style wildcards (`*`, `?`, `[abc]`); dots are literal. |
+| `"exact"` | `"model.layers.0.weight"` | Literal full names, including any wildcard or regex characters. |
+| `"regex"` | `r"model\.layers\.\d+\.weight"` | Full-match regular expressions (`re.fullmatch`). |
+
+Matching is case-sensitive by default and selects a tensor if any pattern matches its
+whole name; the mode is never inferred from checkpoint contents. In glob mode,
+`*` can span dots, and names containing wildcard characters need escaping or
+`tensor_name_match_mode="exact"`. `None` selects all tensors and `[]` selects none.
+With `copy=False`, consume each tensor inline
+because alignment padding can cause buffer reuse even when tensor bytes fit.
+
 ### Buffered I/O
 
 For regular disk files, InstantTensor defaults to Direct I/O to prioritize cold
