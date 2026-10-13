@@ -36,30 +36,25 @@ See [Usage](#usage) for multi-file and distributed usage.
 ### Used by
 
 - **[vLLM](https://github.com/vllm-project/vllm)**: [Loading Model Weights with InstantTensor](https://docs.vllm.ai/en/latest/models/extensions/instanttensor/)
-<!-- - **[SGLang](https://github.com/sgl-project/sglang)**:  -->
+- **[SGLang](https://github.com/sgl-project/sglang)**: [Model Loading](https://lmsysorg.mintlify.app/docs/advanced_features/model_loading)
 
 ## Why InstantTensor?
 
-- **Fast weight loading**
-  - Direct I/O: Avoid the slow page cache allocation on cold start. Friendly for large models and tight memory budgets.
-  - Tuned I/O size and concurrency: Maximize hardware throughput.
-  - Pipelining and prefetching: Parallelize and overlap the various stages of transmission.
-- **Distributed loading**
-  - Use `torch.distributed` (NCCL) to speed up loading under any parallelism policy (TP/PP/EP/CP/DP).
-- **Multiple I/O backends**
-  - Supports multiple backends: GPUDirect Storage, Legacy Storage, and Memory-based Storage.
+- **Fast:** Pipeline I/O, GPU transfers, and prefetching.
+- **Distributed:** Coordinate reads across GPUs with NCCL.
+- **Selective:** Load only the tensors you need.
+- **Flexible:** Support Direct I/O, Buffered I/O, MMAP, and GPUDirect Storage.
+- **Memory-aware:** Reuse configurable staging buffers, with optional zero-copy views.
 
 ## When to Use InstantTensor
 
-InstantTensor is recommended if **any** of the following conditions are met:
-- High storage bandwidth (>= 5 GB/s).
-- Unable to keep the model cached in host memory, for example:
-  - Limited free memory for model caching (for example, when most memory is used for KV cache offloading in LLM serving).
-  - Infrequent model loading, where Linux page cache is less effective.
-  - Model switching, where multiple models cannot be cached in memory simultaneously.
-- The model is heavily sharded (for example, TP=8), resulting in small, non-contiguous I/O per GPU.
-- Loading from `tmpfs`.
+- Loading large checkpoints from fast storage.
+- Cold starts or model switching with limited host-memory cache.
+- Multi-GPU loading from shared checkpoints.
+- Loading only part of a checkpoint, such as MTP weights.
+- Repeated loading from the page cache or tmpfs.
 
+Performance depends on your hardware and workload; benchmark before choosing.
 
 ## Installation
 
@@ -86,23 +81,11 @@ InstantTensor is recommended if **any** of the following conditions are met:
 
 ## Usage
 
-### Multi-file loading
-
-Passing a list of files allows the backend to plan reads and provides higher throughput than making multiple calls to load single files:
-
-```python
-from instanttensor import safe_open
-
-files = ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"]
-tensors = {}
-with safe_open(files, framework="pt", device=0) as f:
-    for name, tensor in f.tensors():
-        tensors[name] = tensor
-```
-
 ### Distributed loading
 
 InstantTensor can use a `torch.distributed` NCCL process group to coordinate loading and achieve higher throughput compared to running `safe_open` independently on each GPU.
+
+Passing all files in a single `safe_open` call lets the backend plan reads across files and typically provides higher throughput than loading each file separately. This applies to both single-GPU and distributed loading.
 
 ```python
 import torch
@@ -184,21 +167,6 @@ A `UserWarning` fires when `copy=False` and `buffer_size < total_tensor_size`.
 Both attributes are public on the `safe_open` object.
 
 See `tests/test.py` for a full benchmark harness (TP/PP grouping, checksums, etc.).
-
-<!-- ## Performance tuning
-
-Users can specify four key parameters in `safe_open` for performance tuning:
-
-- **`buffer_size`**: The size of the GPU buffer used for tensors in bytes.
-
-- **`chunk_size`**: The size of each file I/O operation in bytes.
-
-- **`concurrency`**: The number of `MMAP`/`CUFILE` worker threads. Other
-  backends ignore it.
-
-- **`io_depth`**: The maximum number of rank-local I/O operations in flight.
-
-When set to None (the default), InstantTensor will automatically select a value based on the storage type for high performance. Otherwise, the user-supplied value is used.  -->
 
 ### Backend selection
 
@@ -302,9 +270,11 @@ See [Build API reference](./docs/build_doc.md)
 <!-- ## Benchmark -->
 
 <!-- ## Roadmap
-
-- **Supporting loading to CPU**: E.g., CPU inference.
-- **Improving scalability**: E.g., Collective loading on 32+ GPUs. -->
+- **Host-device buffer decoupling**: Support larger host buffers and smaller device buffers.
+- **Asymmetric loading**: Each GPU loads different tensors.
+- **CPU loading**: E.g., for CPU inference.
+- **Improved scalability**: E.g., collective loading across 32+ GPUs.
+-->
 
 ## Thanks
 
