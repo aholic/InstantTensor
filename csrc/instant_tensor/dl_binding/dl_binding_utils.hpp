@@ -32,7 +32,11 @@ template <typename T>
 inline T resolve(void* handle, const std::string& name) {
     // Clear any previous error
     dlerror();
-    void* sym = dlsym(handle, name.c_str());
+    void* sym = dlsym(RTLD_DEFAULT, name.c_str());
+    if (!sym) {
+        dlerror();
+        sym = dlsym(handle, name.c_str());
+    }
     if (!sym) {
         throw std::runtime_error(std::string("failed to resolve ") + name.c_str() + ": " + dlerror());
     }
@@ -44,7 +48,11 @@ inline T resolve(void* handle, std::initializer_list<std::string> names) {
     void* sym = nullptr;
     for (const auto& name : names) {
         dlerror();
-        sym = dlsym(handle, name.c_str());
+        sym = dlsym(RTLD_DEFAULT, name.c_str());
+        if (!sym) {
+            dlerror();
+            sym = dlsym(handle, name.c_str());
+        }
         if (sym) break;
     }
     if (!sym) {
